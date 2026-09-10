@@ -11,13 +11,12 @@ interface AuthCallbackProps {
 
 export function AuthCallback({ homeserverUrl }: AuthCallbackProps) {
   const [params] = useSearchParams();
-  const loginToken = params.get("loginToken");
-  const authCode = params.get("code");
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
 
   useEffect(() => {
-    // Handle SSO loginToken callback (traditional Matrix SSO)
+    // Check query params first (loginToken from Synapse SSO)
+    const loginToken = params.get("loginToken");
     if (loginToken) {
       exchangeLoginToken(homeserverUrl, loginToken)
         .then((creds) => {
@@ -28,17 +27,19 @@ export function AuthCallback({ homeserverUrl }: AuthCallbackProps) {
       return;
     }
 
-    // Handle OIDC authorization code callback
-    if (authCode) {
-      // For OIDC, we need to exchange the auth code for tokens
-      // This requires the OIDC provider's token endpoint
-      // The web client will need to be configured with the OIDC provider details
-      setError("OIDC authentication requires additional configuration. Please use the traditional login method or configure the OIDC provider.");
+    // Check URL fragment for OIDC authorization code (response_mode=fragment)
+    const fragment = window.location.hash.slice(1);
+    const fragmentParams = new URLSearchParams(fragment);
+    const code = fragmentParams.get("code") ?? params.get("code");
+    if (code) {
+      setError("OIDC authorization code received but token exchange is not yet implemented.");
       return;
     }
-  }, [homeserverUrl, loginToken, authCode]);
+  }, [homeserverUrl, params]);
 
-  if (!loginToken && !authCode) return <Navigate to="/login" replace />;
+  if (!params.get("loginToken") && !window.location.hash.includes("code=")) {
+    return <Navigate to="/login" replace />;
+  }
   if (error) return <div role="alert">{error}</div>;
   if (done) return <Navigate to="/" replace />;
   return (

@@ -11,6 +11,9 @@ import {
   type LoginFlow,
   loginWithPassword,
   ssoRedirectUrl,
+  generatePKCE,
+  getDeviceId,
+  buildAuthorizeUrl,
 } from "../../client/login";
 import { MatrixClientPeg } from "../../client/peg";
 import { registrationSupported } from "../../client/register";
@@ -53,8 +56,15 @@ export function Login({ homeserverUrl, defaultIdpLabel, authConfig }: LoginProps
     if (!authConfig?.issuer || redirectedRef.current) return;
     redirectedRef.current = true;
     const callback = `${window.location.origin}/auth/callback`;
-    const authUrl = `${authConfig.issuer}/authorize?client_id=01M25WCYJPMTW1MHHT5JG2310W&redirect_uri=${encodeURIComponent(callback)}&response_type=code&scope=openid+profile&state=zooid`;
-    window.location.assign(authUrl);
+    const deviceId = getDeviceId();
+    const scopes = `openid urn:matrix:client:api:* urn:matrix:client:device:${deviceId}`;
+    void (async () => {
+      const { verifier, challenge } = await generatePKCE();
+      sessionStorage.setItem("zooid_pkce_verifier", verifier);
+      window.location.assign(
+        buildAuthorizeUrl(authConfig.issuer, "01M25WCYJPMTW1MHHT5JG2310W", callback, scopes, challenge),
+      );
+    })();
   }, [authConfig]);
 
   // Opt-in (VITE_AUTO_REDIRECT_SINGLE_SSO): on an SSO-only homeserver with a
@@ -112,11 +122,16 @@ export function Login({ homeserverUrl, defaultIdpLabel, authConfig }: LoginProps
     }
   };
 
-  const onSso = (idpId?: string) => {
+  const onSso = async (idpId?: string) => {
     const callback = `${window.location.origin}/auth/callback`;
     if (authConfig?.issuer) {
-      const authUrl = `${authConfig.issuer}/authorize?client_id=01M25WCYJPMTW1MHHT5JG2310W&redirect_uri=${encodeURIComponent(callback)}&response_type=code&scope=openid+profile&state=zooid`;
-      window.location.assign(authUrl);
+      const deviceId = getDeviceId();
+      const scopes = `openid urn:matrix:client:api:* urn:matrix:client:device:${deviceId}`;
+      const { verifier, challenge } = await generatePKCE();
+      sessionStorage.setItem("zooid_pkce_verifier", verifier);
+      window.location.assign(
+        buildAuthorizeUrl(authConfig.issuer, "01M25WCYJPMTW1MHHT5JG2310W", callback, scopes, challenge),
+      );
     } else {
       window.location.assign(ssoRedirectUrl(homeserverUrl, callback, idpId));
     }

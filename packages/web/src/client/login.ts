@@ -18,6 +18,39 @@ export interface AuthConfig {
   account?: string;
 }
 
+// PKCE utilities for OIDC authorization code flow
+function base64urlencode(buffer: ArrayBuffer | Uint8Array): string {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+export async function generatePKCE(): Promise<{ verifier: string; challenge: string }> {
+  const verifier = base64urlencode(crypto.getRandomValues(new Uint8Array(32)));
+  const challengeBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+  return { verifier, challenge: base64urlencode(challengeBuffer) };
+}
+
+export function getDeviceId(): string {
+  const existing = sessionStorage.getItem("zooid_device_id");
+  if (existing) return existing;
+  const id = `WEB-${crypto.randomUUID().replace(/-/g, "").slice(0, 10)}`;
+  sessionStorage.setItem("zooid_device_id", id);
+  return id;
+}
+
+export function buildAuthorizeUrl(
+  issuer: string,
+  clientId: string,
+  redirectUri: string,
+  scopes: string,
+  codeChallenge: string,
+): string {
+  const state = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+  return `${issuer}/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&response_mode=fragment&scope=${encodeURIComponent(scopes)}&state=${state}&code_challenge_method=S256&code_challenge=${codeChallenge}`;
+}
+
 export async function fetchLoginFlows(
   homeserverUrl: string,
   authConfig?: AuthConfig,
