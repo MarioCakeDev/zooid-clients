@@ -111,6 +111,53 @@ export async function exchangeLoginToken(
   return parseCredentials(homeserverUrl, await res.json());
 }
 
+export async function exchangeAuthorizationCode(
+  homeserverUrl: string,
+  issuer: string,
+  code: string,
+  codeVerifier: string,
+  redirectUri: string,
+): Promise<Credentials> {
+  const clientId = "01M25WCYJPMTW1MHHT5JG2310W";
+  const tokenRes = await fetch(`${issuer}/oauth2/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: redirectUri,
+      client_id: clientId,
+      code_verifier: codeVerifier,
+    }),
+  });
+  if (!tokenRes.ok) {
+    const body = await tokenRes.text();
+    throw new Error(`Token exchange failed (${tokenRes.status}): ${body}`);
+  }
+  const tokenData = (await tokenRes.json()) as {
+    access_token: string;
+    token_type: string;
+    expires_in: number;
+    refresh_token?: string;
+    scope: string;
+  };
+  const accessToken = tokenData.access_token;
+
+  // Resolve Matrix user ID via whoami
+  const whoamiRes = await fetch(`${homeserverUrl}/_matrix/client/v3/account/whoami`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!whoamiRes.ok) throw await matrixError(whoamiRes);
+  const whoami = (await whoamiRes.json()) as { user_id: string; device_id?: string };
+
+  return {
+    homeserverUrl,
+    accessToken,
+    userId: whoami.user_id,
+    deviceId: whoami.device_id ?? getDeviceId(),
+  };
+}
+
 export function ssoRedirectUrl(
   homeserverUrl: string,
   redirectUrl: string,

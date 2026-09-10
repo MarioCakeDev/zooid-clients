@@ -161,7 +161,7 @@ function AppRoutes({ config }: { config: AppConfig }) {
           )
         }
       />
-      <Route path="/auth/callback" element={<AuthCallback homeserverUrl={config.homeserverUrl} />} />
+      <Route path="/auth/callback" element={<AuthCallback homeserverUrl={config.homeserverUrl} authIssuer={config.authConfig?.issuer} />} />
     </Routes>
   );
 }
