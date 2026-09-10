@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import {
   fetchLoginFlows,
+  type AuthConfig,
   type LoginFlow,
   loginWithPassword,
   ssoRedirectUrl,
@@ -25,9 +26,10 @@ function homeserverHost(url: string): string {
 interface LoginProps {
   homeserverUrl: string;
   defaultIdpLabel: string | null;
+  authConfig?: AuthConfig;
 }
 
-export function Login({ homeserverUrl, defaultIdpLabel }: LoginProps) {
+export function Login({ homeserverUrl, defaultIdpLabel, authConfig }: LoginProps) {
   const [flows, setFlows] = useState<LoginFlow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -35,16 +37,25 @@ export function Login({ homeserverUrl, defaultIdpLabel }: LoginProps) {
   const redirectedRef = useRef(false);
 
   useEffect(() => {
-    fetchLoginFlows(homeserverUrl)
+    fetchLoginFlows(homeserverUrl, authConfig)
       .then(setFlows)
       .catch((e) => setError(String(e.message ?? e)));
-  }, [homeserverUrl]);
+  }, [homeserverUrl, authConfig]);
 
   useEffect(() => {
     registrationSupported(homeserverUrl)
       .then((s) => setCanRegister(s.supported))
       .catch(() => setCanRegister(false));
   }, [homeserverUrl]);
+
+  // When OIDC/MAS is configured, auto-redirect to the OIDC flow
+  useEffect(() => {
+    if (!authConfig?.issuer || redirectedRef.current) return;
+    redirectedRef.current = true;
+    const callback = `${window.location.origin}/auth/callback`;
+    const authUrl = `${authConfig.issuer}/authorize?client_id=zooid-web&redirect_uri=${encodeURIComponent(callback)}&response_type=code&scope=openid+profile&state=zooid`;
+    window.location.assign(authUrl);
+  }, [authConfig]);
 
   // Opt-in (VITE_AUTO_REDIRECT_SINGLE_SSO): on an SSO-only homeserver with a
   // single IdP (e.g. the Zoon community space behind accounts.zooid.dev), skip

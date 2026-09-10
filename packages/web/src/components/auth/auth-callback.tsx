@@ -12,20 +12,33 @@ interface AuthCallbackProps {
 export function AuthCallback({ homeserverUrl }: AuthCallbackProps) {
   const [params] = useSearchParams();
   const loginToken = params.get("loginToken");
+  const authCode = params.get("code");
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
 
   useEffect(() => {
-    if (!loginToken) return;
-    exchangeLoginToken(homeserverUrl, loginToken)
-      .then((creds) => {
-        MatrixClientPeg.set(creds);
-        setDone(true);
-      })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
-  }, [homeserverUrl, loginToken]);
+    // Handle SSO loginToken callback (traditional Matrix SSO)
+    if (loginToken) {
+      exchangeLoginToken(homeserverUrl, loginToken)
+        .then((creds) => {
+          MatrixClientPeg.set(creds);
+          setDone(true);
+        })
+        .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+      return;
+    }
 
-  if (!loginToken) return <Navigate to="/login" replace />;
+    // Handle OIDC authorization code callback
+    if (authCode) {
+      // For OIDC, we need to exchange the auth code for tokens
+      // This requires the OIDC provider's token endpoint
+      // The web client will need to be configured with the OIDC provider details
+      setError("OIDC authentication requires additional configuration. Please use the traditional login method or configure the OIDC provider.");
+      return;
+    }
+  }, [homeserverUrl, loginToken, authCode]);
+
+  if (!loginToken && !authCode) return <Navigate to="/login" replace />;
   if (error) return <div role="alert">{error}</div>;
   if (done) return <Navigate to="/" replace />;
   return (

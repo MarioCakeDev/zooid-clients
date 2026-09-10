@@ -18,16 +18,17 @@ async function bootstrap() {
       buildtime: import.meta.env.VITE_GLOBAL_SEARCH as string | undefined,
     }),
   );
-  const homeserverUrl = await discoverHomeserver({
+  const homeserverResult = await discoverHomeserver({
     mxid: null,
     runtimeConfig: runtime,
     buildtimeUrl,
   });
   const config: AppConfig = {
-    homeserverUrl,
+    homeserverUrl: homeserverResult.homeserverUrl,
     defaultIdpLabel: runtime?.default_idp_label ?? null,
     pushGatewayUrl: runtime?.push_gateway_url,
     vapidPublicKey: runtime?.vapid_public_key,
+    authConfig: homeserverResult.authConfig,
   };
   if (import.meta.env.DEV) {
     // Affordance for Playwright e2e (and ZNC002 features) to call SDK methods

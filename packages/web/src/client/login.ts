@@ -13,9 +13,31 @@ export interface Credentials {
   deviceId: string;
 }
 
-export async function fetchLoginFlows(homeserverUrl: string): Promise<LoginFlow[]> {
+export interface AuthConfig {
+  issuer: string;
+  account?: string;
+}
+
+export async function fetchLoginFlows(
+  homeserverUrl: string,
+  authConfig?: AuthConfig,
+): Promise<LoginFlow[]> {
+  // If OIDC/MAS is configured, the server returns HTML instead of JSON.
+  // In that case, return a synthetic SSO flow so the UI shows the login button.
+  if (authConfig?.issuer) {
+    return [{ type: "m.login.sso", identity_providers: [{ id: "oidc", name: "Sign in" }] }];
+  }
+
   const res = await fetch(`${homeserverUrl}/_matrix/client/v3/login`);
   if (!res.ok) throw await matrixError(res);
+
+  // Detect MAS HTML response (MAS returns HTML instead of JSON for /login)
+  const contentType = res.headers.get("content-type") || "";
+  if (contentType.includes("text/html")) {
+    // Server uses MAS/OIDC — return a synthetic SSO flow
+    return [{ type: "m.login.sso", identity_providers: [{ id: "oidc", name: "Sign in" }] }];
+  }
+
   const json = (await res.json()) as { flows: LoginFlow[] };
   return json.flows;
 }

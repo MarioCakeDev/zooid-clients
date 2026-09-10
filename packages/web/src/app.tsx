@@ -26,6 +26,10 @@ export interface AppConfig {
   defaultIdpLabel?: string | null;
   pushGatewayUrl?: string;
   vapidPublicKey?: string;
+  authConfig?: {
+    issuer: string;
+    account?: string;
+  };
 }
 
 export function App({
@@ -142,6 +146,7 @@ function AppRoutes({ config }: { config: AppConfig }) {
             <Login
               homeserverUrl={config.homeserverUrl}
               defaultIdpLabel={config.defaultIdpLabel ?? null}
+              authConfig={config.authConfig}
             />
           )
         }
