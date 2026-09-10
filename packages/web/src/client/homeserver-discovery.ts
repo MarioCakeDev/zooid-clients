@@ -62,8 +62,8 @@ async function fetchWellKnown(domain: string): Promise<WellKnownResult | null> {
     const baseUrl = homeserver?.base_url;
     if (!baseUrl) return null;
     return {
-      homeserverUrl: baseUrl,
-      authConfig: auth?.issuer ? { issuer: auth.issuer, account: auth.account } : undefined,
+      homeserverUrl: baseUrl.replace(/\/+$/, ""),
+      authConfig: auth?.issuer ? { issuer: auth.issuer.replace(/\/+$/, ""), account: auth.account } : undefined,
     };
   } catch {
     return null;

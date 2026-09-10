@@ -119,7 +119,8 @@ export async function exchangeAuthorizationCode(
   redirectUri: string,
 ): Promise<Credentials> {
   const clientId = "01M25WCYJPMTW1MHHT5JG2310W";
-  const tokenRes = await fetch(`${issuer}/oauth2/token`, {
+  const tokenEndpoint = `${issuer.replace(/\/+$/, "")}/oauth2/token`;
+  const tokenRes = await fetch(tokenEndpoint, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -144,7 +145,7 @@ export async function exchangeAuthorizationCode(
   const accessToken = tokenData.access_token;
 
   // Resolve Matrix user ID via whoami
-  const whoamiRes = await fetch(`${homeserverUrl}/_matrix/client/v3/account/whoami`, {
+  const whoamiRes = await fetch(`${homeserverUrl.replace(/\/+$/, "")}/_matrix/client/v3/account/whoami`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!whoamiRes.ok) throw await matrixError(whoamiRes);
