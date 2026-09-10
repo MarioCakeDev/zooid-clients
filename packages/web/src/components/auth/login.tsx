@@ -53,7 +53,7 @@ export function Login({ homeserverUrl, defaultIdpLabel, authConfig }: LoginProps
     if (!authConfig?.issuer || redirectedRef.current) return;
     redirectedRef.current = true;
     const callback = `${window.location.origin}/auth/callback`;
-    const authUrl = `${authConfig.issuer}/authorize?client_id=zooid-web&redirect_uri=${encodeURIComponent(callback)}&response_type=code&scope=openid+profile&state=zooid`;
+    const authUrl = `${authConfig.issuer}/authorize?client_id=01M25WCYJPMTW1MHHT5JG2310W&redirect_uri=${encodeURIComponent(callback)}&response_type=code&scope=openid+profile&state=zooid`;
     window.location.assign(authUrl);
   }, [authConfig]);
 
@@ -115,7 +115,7 @@ export function Login({ homeserverUrl, defaultIdpLabel, authConfig }: LoginProps
   const onSso = (idpId?: string) => {
     const callback = `${window.location.origin}/auth/callback`;
     if (authConfig?.issuer) {
-      const authUrl = `${authConfig.issuer}/authorize?client_id=zooid-web&redirect_uri=${encodeURIComponent(callback)}&response_type=code&scope=openid+profile&state=zooid`;
+      const authUrl = `${authConfig.issuer}/authorize?client_id=01M25WCYJPMTW1MHHT5JG2310W&redirect_uri=${encodeURIComponent(callback)}&response_type=code&scope=openid+profile&state=zooid`;
       window.location.assign(authUrl);
     } else {
       window.location.assign(ssoRedirectUrl(homeserverUrl, callback, idpId));
