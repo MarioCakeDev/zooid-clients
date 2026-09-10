@@ -18,15 +18,25 @@ export interface WellKnownResult {
 //   1. user-typed MXID → .well-known/matrix/client on the MXID's domain
 //   2. runtime /config.json
 //   3. build-time VITE_MATRIX_HOMESERVER_URL
+// When using a buildtime or runtime URL, we still attempt to fetch well-known
+// from that domain so that org.matrix.msc2965.authentication (MAS/OIDC) is
+// discovered.
 export async function discoverHomeserver(input: DiscoverInput): Promise<WellKnownResult> {
   if (input.mxid) {
     const domain = mxidDomain(input.mxid);
     const wellKnown = await fetchWellKnown(domain);
     if (wellKnown) return wellKnown;
   }
-  if (input.runtimeConfig?.homeserver_url)
-    return { homeserverUrl: input.runtimeConfig.homeserver_url };
-  if (input.buildtimeUrl) return { homeserverUrl: input.buildtimeUrl };
+  const fallbackUrl = input.runtimeConfig?.homeserver_url ?? input.buildtimeUrl;
+  if (fallbackUrl) {
+    // Try well-known discovery from the fallback domain before returning bare URL.
+    try {
+      const domain = new URL(fallbackUrl).host;
+      const wellKnown = await fetchWellKnown(domain);
+      if (wellKnown) return wellKnown;
+    } catch { /* ignore — fall through to bare URL */ }
+    return { homeserverUrl: fallbackUrl };
+  }
   throw new Error("No homeserver URL could be resolved");
 }
 

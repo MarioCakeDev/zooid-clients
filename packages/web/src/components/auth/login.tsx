@@ -114,7 +114,12 @@ export function Login({ homeserverUrl, defaultIdpLabel, authConfig }: LoginProps
 
   const onSso = (idpId?: string) => {
     const callback = `${window.location.origin}/auth/callback`;
-    window.location.assign(ssoRedirectUrl(homeserverUrl, callback, idpId));
+    if (authConfig?.issuer) {
+      const authUrl = `${authConfig.issuer}/authorize?client_id=zooid-web&redirect_uri=${encodeURIComponent(callback)}&response_type=code&scope=openid+profile&state=zooid`;
+      window.location.assign(authUrl);
+    } else {
+      window.location.assign(ssoRedirectUrl(homeserverUrl, callback, idpId));
+    }
   };
 
   const ssoIdps = ssoFlow?.identity_providers ?? (ssoFlow ? [{ id: "", name: defaultIdpLabel ?? "SSO" }] : []);
