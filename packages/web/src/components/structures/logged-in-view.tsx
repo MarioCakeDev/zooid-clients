@@ -51,7 +51,7 @@ export function LoggedInView({ pushGatewayUrl, vapidPublicKey }: LoggedInViewPro
   const myName = useUserName(userId);
   const serverName = userId.split(":")[1] ?? userId;
   const spaceLocalpart =
-    (import.meta.env.VITE_WORKFORCE_SPACE as string | undefined) ?? "dev";
+    (import.meta.env.VITE_WORKFORCE_SPACE as string | undefined) ?? "zooid";
   const { ready: workforceSpaceReady, spaceId } = useActiveSpaceId(spaceLocalpart, serverName);
   const joinedSpaces = useJoinedSpaces();
   const [scope, setScope] = useState<Scope | null>(null);
