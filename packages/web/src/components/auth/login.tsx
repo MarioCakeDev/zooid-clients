@@ -14,6 +14,7 @@ import {
   generatePKCE,
   getDeviceId,
   buildAuthorizeUrl,
+  OIDC_CLIENT_ID,
 } from "../../client/login";
 import { MatrixClientPeg } from "../../client/peg";
 import { registrationSupported } from "../../client/register";
@@ -62,7 +63,7 @@ export function Login({ homeserverUrl, defaultIdpLabel, authConfig }: LoginProps
       const { verifier, challenge } = await generatePKCE();
       sessionStorage.setItem("zooid_pkce_verifier", verifier);
       window.location.assign(
-        buildAuthorizeUrl(authConfig.issuer, "01M25WCYJPMTW1MHHT5JG2310W", callback, scopes, challenge),
+        buildAuthorizeUrl(authConfig.issuer, OIDC_CLIENT_ID, callback, scopes, challenge),
       );
     })();
   }, [authConfig]);
@@ -130,7 +131,7 @@ export function Login({ homeserverUrl, defaultIdpLabel, authConfig }: LoginProps
       const { verifier, challenge } = await generatePKCE();
       sessionStorage.setItem("zooid_pkce_verifier", verifier);
       window.location.assign(
-        buildAuthorizeUrl(authConfig.issuer, "01M25WCYJPMTW1MHHT5JG2310W", callback, scopes, challenge),
+        buildAuthorizeUrl(authConfig.issuer, OIDC_CLIENT_ID, callback, scopes, challenge),
       );
     } else {
       window.location.assign(ssoRedirectUrl(homeserverUrl, callback, idpId));
