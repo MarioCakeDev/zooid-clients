@@ -6,12 +6,12 @@ import {
   exchangeLoginToken,
   fetchLoginFlows,
   loginWithPassword,
-  OIDC_CLIENT_ID,
   refreshAccessToken,
   ssoRedirectUrl,
 } from "./login";
 
 const HS = "https://h.example";
+const CLIENT_ID = "test-oidc-client";
 
 describe("fetchLoginFlows", () => {
   it("returns the flows array verbatim", async () => {
@@ -110,7 +110,7 @@ describe("exchangeAuthorizationCode", () => {
       http.post(`${ISSUER}/oauth2/token`, async ({ request }) => {
         const body = new URLSearchParams(await request.text());
         expect(body.get("grant_type")).toBe("authorization_code");
-        expect(body.get("client_id")).toBe(OIDC_CLIENT_ID);
+        expect(body.get("client_id")).toBe(CLIENT_ID);
         expect(body.get("code_verifier")).toBe("verifier");
         return HttpResponse.json({
           access_token: "at1",
@@ -129,12 +129,14 @@ describe("exchangeAuthorizationCode", () => {
     const creds = await exchangeAuthorizationCode(
       HS,
       ISSUER,
+      CLIENT_ID,
       "code",
       "verifier",
       "https://app.example/auth/callback",
     );
     expect(creds.refreshToken).toBe("rt1");
     expect(creds.issuer).toBe(ISSUER);
+    expect(creds.oidcClientId).toBe(CLIENT_ID);
     expect(creds.expiresAt).toBeGreaterThanOrEqual(before + 300_000);
   });
 });
@@ -146,7 +148,7 @@ describe("refreshAccessToken", () => {
         const body = new URLSearchParams(await request.text());
         expect(body.get("grant_type")).toBe("refresh_token");
         expect(body.get("refresh_token")).toBe("rt1");
-        expect(body.get("client_id")).toBe(OIDC_CLIENT_ID);
+        expect(body.get("client_id")).toBe(CLIENT_ID);
         return HttpResponse.json({
           access_token: "at2",
           expires_in: 300,
@@ -154,7 +156,7 @@ describe("refreshAccessToken", () => {
         });
       }),
     );
-    const tokens = await refreshAccessToken(ISSUER, "rt1");
+    const tokens = await refreshAccessToken(ISSUER, "rt1", CLIENT_ID);
     expect(tokens.accessToken).toBe("at2");
     expect(tokens.refreshToken).toBe("rt2");
     expect(tokens.expiresAt).toBeGreaterThan(Date.now());
@@ -166,7 +168,7 @@ describe("refreshAccessToken", () => {
         HttpResponse.json({ access_token: "at2", expires_in: 300 }),
       ),
     );
-    const tokens = await refreshAccessToken(ISSUER, "rt1");
+    const tokens = await refreshAccessToken(ISSUER, "rt1", CLIENT_ID);
     expect(tokens.refreshToken).toBe("rt1");
   });
 
@@ -176,6 +178,6 @@ describe("refreshAccessToken", () => {
         HttpResponse.json({ error: "invalid_grant" }, { status: 400 }),
       ),
     );
-    await expect(refreshAccessToken(ISSUER, "stale")).rejects.toThrow(/invalid_grant/);
+    await expect(refreshAccessToken(ISSUER, "stale", CLIENT_ID)).rejects.toThrow(/invalid_grant/);
   });
 });

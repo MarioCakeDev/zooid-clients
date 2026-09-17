@@ -19,6 +19,12 @@ export interface Credentials {
   refreshToken?: string;
   /** OIDC issuer to refresh tokens against. Set for MAS/OIDC sessions. */
   issuer?: string;
+  /**
+   * Public OIDC client id this session authorized with. Persisted so a refresh
+   * (including one triggered after a reload) sends the same `client_id` the
+   * refresh token was issued to.
+   */
+  oidcClientId?: string;
   /** Absolute epoch-ms at which `accessToken` expires, when the OP told us. */
   expiresAt?: number;
 }
@@ -26,10 +32,13 @@ export interface Credentials {
 export interface AuthConfig {
   issuer: string;
   account?: string;
+  /**
+   * Public OIDC client id registered with MAS for this deployment. Resolved
+   * from runtime `/config.json` or build-time `VITE_OIDC_CLIENT_ID` — never
+   * hardcoded, since it belongs to the homeserver this build is served for.
+   */
+  oidcClientId?: string;
 }
-
-/** Public OIDC client registered with MAS for this web client. */
-export const OIDC_CLIENT_ID = "01M25WCYJPMTW1MHHT5JG2310W";
 
 /**
  * Access token lifetimes are refreshed this far ahead of expiry, so a refresh
@@ -133,6 +142,7 @@ export async function exchangeLoginToken(
 export async function exchangeAuthorizationCode(
   homeserverUrl: string,
   issuer: string,
+  oidcClientId: string,
   code: string,
   codeVerifier: string,
   redirectUri: string,
@@ -145,7 +155,7 @@ export async function exchangeAuthorizationCode(
       grant_type: "authorization_code",
       code,
       redirect_uri: redirectUri,
-      client_id: OIDC_CLIENT_ID,
+      client_id: oidcClientId,
       code_verifier: codeVerifier,
     }),
   });
@@ -176,6 +186,7 @@ export async function exchangeAuthorizationCode(
     deviceId: whoami.device_id ?? getDeviceId(),
     refreshToken: tokenData.refresh_token,
     issuer: issuer.replace(/\/+$/, ""),
+    oidcClientId,
     expiresAt: expiryFrom(tokenData.expires_in),
   };
 }
@@ -202,6 +213,7 @@ export interface RefreshedTokens {
 export async function refreshAccessToken(
   issuer: string,
   refreshToken: string,
+  oidcClientId: string,
 ): Promise<RefreshedTokens> {
   const tokenEndpoint = `${issuer.replace(/\/+$/, "")}/oauth2/token`;
   const res = await fetch(tokenEndpoint, {
@@ -210,7 +222,7 @@ export async function refreshAccessToken(
     body: new URLSearchParams({
       grant_type: "refresh_token",
       refresh_token: refreshToken,
-      client_id: OIDC_CLIENT_ID,
+      client_id: oidcClientId,
     }),
   });
   if (!res.ok) {

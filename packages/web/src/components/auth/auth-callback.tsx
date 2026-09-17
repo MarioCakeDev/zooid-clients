@@ -2,15 +2,19 @@ import { useEffect, useState } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia } from "@/components/ui/empty";
 import { Spinner } from "@/components/ui/spinner";
-import { exchangeLoginToken, exchangeAuthorizationCode } from "../../client/login";
+import {
+  exchangeLoginToken,
+  exchangeAuthorizationCode,
+  type AuthConfig,
+} from "../../client/login";
 import { MatrixClientPeg } from "../../client/peg";
 
 interface AuthCallbackProps {
   homeserverUrl: string;
-  authIssuer?: string;
+  authConfig?: AuthConfig;
 }
 
-export function AuthCallback({ homeserverUrl, authIssuer }: AuthCallbackProps) {
+export function AuthCallback({ homeserverUrl, authConfig }: AuthCallbackProps) {
   const [params] = useSearchParams();
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
@@ -32,14 +36,27 @@ export function AuthCallback({ homeserverUrl, authIssuer }: AuthCallbackProps) {
     const fragment = window.location.hash.slice(1);
     const fragmentParams = new URLSearchParams(fragment);
     const code = fragmentParams.get("code") ?? params.get("code");
-    if (code && authIssuer) {
+    if (code && authConfig?.issuer) {
       const codeVerifier = sessionStorage.getItem("zooid_pkce_verifier");
       if (!codeVerifier) {
         setError("Missing PKCE verifier. Please try signing in again.");
         return;
       }
+      if (!authConfig.oidcClientId) {
+        setError(
+          "OIDC login is not configured for this deployment (missing oidc_client_id).",
+        );
+        return;
+      }
       const redirectUri = `${window.location.origin}/auth/callback`;
-      exchangeAuthorizationCode(homeserverUrl, authIssuer, code, codeVerifier, redirectUri)
+      exchangeAuthorizationCode(
+        homeserverUrl,
+        authConfig.issuer,
+        authConfig.oidcClientId,
+        code,
+        codeVerifier,
+        redirectUri,
+      )
         .then((creds) => {
           sessionStorage.removeItem("zooid_pkce_verifier");
           MatrixClientPeg.set(creds);
@@ -48,7 +65,7 @@ export function AuthCallback({ homeserverUrl, authIssuer }: AuthCallbackProps) {
         .catch((e) => setError(e instanceof Error ? e.message : String(e)));
       return;
     }
-  }, [homeserverUrl, authIssuer, params]);
+  }, [homeserverUrl, authConfig?.issuer, authConfig?.oidcClientId, params]);
 
   if (!params.get("loginToken") && !window.location.hash.includes("code=")) {
     return <Navigate to="/login" replace />;

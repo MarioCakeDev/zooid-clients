@@ -6,7 +6,7 @@ import { BootstrapError } from "@/components/bootstrap-error";
 import { ThemeProvider } from "@/components/theme-provider";
 import { discoverHomeserver } from "./client/homeserver-discovery";
 import { resolveGlobalSearch, setGlobalSearchEnabled } from "./client/feature-flags";
-import { loadRuntimeConfig } from "./client/runtime-config";
+import { loadRuntimeConfig, resolveOidcClientId } from "./client/runtime-config";
 
 const buildtimeUrl = (import.meta.env.VITE_MATRIX_HOMESERVER_URL as string | undefined) ?? null;
 
@@ -23,12 +23,22 @@ async function bootstrap() {
     runtimeConfig: runtime,
     buildtimeUrl,
   });
+  // The OIDC client id is deployment config, not part of homeserver discovery.
+  // Merge it into the discovered authConfig so the login and callback routes
+  // have it without reaching for globals.
+  const oidcClientId = resolveOidcClientId({
+    runtime: runtime?.oidc_client_id,
+    buildtime: import.meta.env.VITE_OIDC_CLIENT_ID as string | undefined,
+  });
+  const authConfig = homeserverResult.authConfig
+    ? { ...homeserverResult.authConfig, ...(oidcClientId ? { oidcClientId } : {}) }
+    : undefined;
   const config: AppConfig = {
     homeserverUrl: homeserverResult.homeserverUrl,
     defaultIdpLabel: runtime?.default_idp_label ?? null,
     pushGatewayUrl: runtime?.push_gateway_url,
     vapidPublicKey: runtime?.vapid_public_key,
-    authConfig: homeserverResult.authConfig,
+    authConfig,
   };
   if (import.meta.env.DEV) {
     // Affordance for Playwright e2e (and ZNC002 features) to call SDK methods

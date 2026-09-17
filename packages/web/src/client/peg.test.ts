@@ -119,15 +119,23 @@ describe("MatrixClientPeg", () => {
 
   describe("OIDC token refresh", () => {
     const ISSUER = "https://mas.example";
+    const CLIENT_ID = "test-oidc-client";
     const oidcCreds = {
       ...creds,
       refreshToken: "rt1",
       issuer: ISSUER,
+      oidcClientId: CLIENT_ID,
       expiresAt: Date.now() + 300_000,
     };
 
     it("does not configure refresh for a non-OIDC session", () => {
       const c = MatrixClientPeg.set(creds);
+      expect(c.getRefreshToken()).toBeNull();
+    });
+
+    it("does not configure refresh without a client id", () => {
+      const { oidcClientId: _drop, ...withoutClientId } = oidcCreds;
+      const c = MatrixClientPeg.set(withoutClientId);
       expect(c.getRefreshToken()).toBeNull();
     });
 
@@ -143,6 +151,7 @@ describe("MatrixClientPeg", () => {
           const body = new URLSearchParams(await request.text());
           expect(body.get("grant_type")).toBe("refresh_token");
           expect(body.get("refresh_token")).toBe("rt1");
+          expect(body.get("client_id")).toBe(CLIENT_ID);
           calls.push("refresh");
           return HttpResponse.json({ access_token: "at2", expires_in: 300, refresh_token: "rt2" });
         }),

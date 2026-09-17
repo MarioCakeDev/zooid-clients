@@ -55,7 +55,7 @@ class MatrixClientPegImpl {
     // A MAS/OIDC session carries a refresh token; wiring it into the SDK lets
     // a request that trips over an expired access token refresh and retry
     // instead of surfacing M_UNKNOWN_TOKEN and dropping the user at /login.
-    const canRefresh = Boolean(creds.issuer && creds.refreshToken);
+    const canRefresh = Boolean(creds.issuer && creds.refreshToken && creds.oidcClientId);
     this.client = createClient({
       baseUrl: creds.homeserverUrl,
       accessToken: creds.accessToken,
@@ -108,12 +108,16 @@ class MatrixClientPegImpl {
       }));
     }
     const current = this.creds;
-    if (!current?.issuer || !current.refreshToken) {
+    if (!current?.issuer || !current.refreshToken || !current.oidcClientId) {
       return Promise.reject(new Error("MatrixClientPeg: no OIDC refresh token for this session"));
     }
     const generation = this.sessionGeneration;
     const run = (async () => {
-      const next = await refreshAccessToken(current.issuer!, current.refreshToken!);
+      const next = await refreshAccessToken(
+        current.issuer!,
+        current.refreshToken!,
+        current.oidcClientId!,
+      );
       if (this.sessionGeneration !== generation) {
         throw new Error("MatrixClientPeg: session changed during token refresh");
       }
@@ -146,7 +150,7 @@ class MatrixClientPegImpl {
   private scheduleTokenRefresh(): void {
     this.clearRefreshTimer();
     const creds = this.creds;
-    if (!creds?.issuer || !creds.refreshToken || !creds.expiresAt) return;
+    if (!creds?.issuer || !creds.refreshToken || !creds.oidcClientId || !creds.expiresAt) return;
     const delay = Math.max(creds.expiresAt - Date.now() - TOKEN_REFRESH_LEAD_MS, 0);
     this.refreshTimer = setTimeout(() => {
       void this.refreshOidcTokens().catch((err) => {

@@ -1,7 +1,7 @@
 import { http, HttpResponse } from "msw";
 import { describe, expect, it } from "vitest";
 import { mswServer } from "../../test/setup";
-import { loadRuntimeConfig } from "./runtime-config";
+import { loadRuntimeConfig, resolveOidcClientId } from "./runtime-config";
 
 describe("loadRuntimeConfig", () => {
   it("parses a valid config.json", async () => {
@@ -73,5 +73,44 @@ describe("loadRuntimeConfig", () => {
       http.get("/config.json", () => HttpResponse.json({ push_gateway_url: 42, vapid_public_key: null })),
     );
     expect(await loadRuntimeConfig()).toEqual({});
+  });
+
+  it("reads the OIDC client id", async () => {
+    mswServer.use(
+      http.get("/config.json", () => HttpResponse.json({ oidc_client_id: "01M25" })),
+    );
+    expect(await loadRuntimeConfig()).toEqual({ oidc_client_id: "01M25" });
+  });
+
+  it("drops a non-string OIDC client id", async () => {
+    mswServer.use(
+      http.get("/config.json", () => HttpResponse.json({ oidc_client_id: 42 })),
+    );
+    expect(await loadRuntimeConfig()).toEqual({});
+  });
+});
+
+describe("resolveOidcClientId", () => {
+  it("prefers runtime config over build-time", () => {
+    expect(
+      resolveOidcClientId({ runtime: "runtime-id", buildtime: "build-id" }),
+    ).toBe("runtime-id");
+  });
+
+  it("falls back to build-time when runtime is absent", () => {
+    expect(resolveOidcClientId({ buildtime: "build-id" })).toBe("build-id");
+  });
+
+  it("returns null when neither is set — no hardcoded default", () => {
+    expect(resolveOidcClientId({})).toBeNull();
+    expect(resolveOidcClientId({ runtime: "", buildtime: "  " })).toBeNull();
+  });
+
+  it("treats a blank runtime value as absent and falls back to build-time", () => {
+    expect(resolveOidcClientId({ runtime: "  ", buildtime: "build-id" })).toBe("build-id");
+  });
+
+  it("trims surrounding whitespace", () => {
+    expect(resolveOidcClientId({ buildtime: "  build-id  " })).toBe("build-id");
   });
 });
