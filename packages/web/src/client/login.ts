@@ -11,12 +11,40 @@ export interface Credentials {
   accessToken: string;
   userId: string;
   deviceId: string;
+  /**
+   * OIDC refresh token, when the session came from a MAS/OIDC login. Its
+   * presence (together with `issuer`) is what lets the session outlive a
+   * short-lived access token.
+   */
+  refreshToken?: string;
+  /** OIDC issuer to refresh tokens against. Set for MAS/OIDC sessions. */
+  issuer?: string;
+  /**
+   * Public OIDC client id this session authorized with. Persisted so a refresh
+   * (including one triggered after a reload) sends the same `client_id` the
+   * refresh token was issued to.
+   */
+  oidcClientId?: string;
+  /** Absolute epoch-ms at which `accessToken` expires, when the OP told us. */
+  expiresAt?: number;
 }
 
 export interface AuthConfig {
   issuer: string;
   account?: string;
+  /**
+   * Public OIDC client id registered with MAS for this deployment. Resolved
+   * from runtime `/config.json` or build-time `VITE_OIDC_CLIENT_ID` — never
+   * hardcoded, since it belongs to the homeserver this build is served for.
+   */
+  oidcClientId?: string;
 }
+
+/**
+ * Access token lifetimes are refreshed this far ahead of expiry, so a refresh
+ * lands before the next request can be rejected with M_UNKNOWN_TOKEN.
+ */
+export const TOKEN_REFRESH_LEAD_MS = 60_000;
 
 // PKCE utilities for OIDC authorization code flow
 function base64urlencode(buffer: ArrayBuffer | Uint8Array): string {
@@ -114,11 +142,11 @@ export async function exchangeLoginToken(
 export async function exchangeAuthorizationCode(
   homeserverUrl: string,
   issuer: string,
+  oidcClientId: string,
   code: string,
   codeVerifier: string,
   redirectUri: string,
 ): Promise<Credentials> {
-  const clientId = "01M25WCYJPMTW1MHHT5JG2310W";
   const tokenEndpoint = `${issuer.replace(/\/+$/, "")}/oauth2/token`;
   const tokenRes = await fetch(tokenEndpoint, {
     method: "POST",
@@ -127,7 +155,7 @@ export async function exchangeAuthorizationCode(
       grant_type: "authorization_code",
       code,
       redirect_uri: redirectUri,
-      client_id: clientId,
+      client_id: oidcClientId,
       code_verifier: codeVerifier,
     }),
   });
@@ -156,6 +184,60 @@ export async function exchangeAuthorizationCode(
     accessToken,
     userId: whoami.user_id,
     deviceId: whoami.device_id ?? getDeviceId(),
+    refreshToken: tokenData.refresh_token,
+    issuer: issuer.replace(/\/+$/, ""),
+    oidcClientId,
+    expiresAt: expiryFrom(tokenData.expires_in),
+  };
+}
+
+/** Turn an `expires_in` (seconds, per OAuth) into an absolute epoch-ms instant. */
+function expiryFrom(expiresIn: number | undefined): number | undefined {
+  return typeof expiresIn === "number" && Number.isFinite(expiresIn)
+    ? Date.now() + expiresIn * 1000
+    : undefined;
+}
+
+export interface RefreshedTokens {
+  accessToken: string;
+  refreshToken?: string;
+  expiresAt?: number;
+}
+
+/**
+ * Exchange an OIDC refresh token for a fresh access token via the issuer's
+ * token endpoint. MAS rotates refresh tokens; when it does, the new one is
+ * returned and callers must persist it. A response without a new refresh token
+ * means the old one stays valid and is returned unchanged.
+ */
+export async function refreshAccessToken(
+  issuer: string,
+  refreshToken: string,
+  oidcClientId: string,
+): Promise<RefreshedTokens> {
+  const tokenEndpoint = `${issuer.replace(/\/+$/, "")}/oauth2/token`;
+  const res = await fetch(tokenEndpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      client_id: oidcClientId,
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Token refresh failed (${res.status}): ${body}`);
+  }
+  const data = (await res.json()) as {
+    access_token: string;
+    expires_in?: number;
+    refresh_token?: string;
+  };
+  return {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token ?? refreshToken,
+    expiresAt: expiryFrom(data.expires_in),
   };
 }
 

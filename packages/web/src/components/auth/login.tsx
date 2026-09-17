@@ -39,6 +39,11 @@ export function Login({ homeserverUrl, defaultIdpLabel, authConfig }: LoginProps
   const [canRegister, setCanRegister] = useState(false);
   const redirectedRef = useRef(false);
 
+  // The OIDC client id is deployment configuration (runtime /config.json or
+  // VITE_OIDC_CLIENT_ID), not a constant — see resolveOidcClientId.
+  const oidcClientId = authConfig?.oidcClientId;
+  const oidcMisconfigured = Boolean(authConfig?.issuer) && !oidcClientId;
+
   useEffect(() => {
     fetchLoginFlows(homeserverUrl, authConfig)
       .then(setFlows)
@@ -53,7 +58,7 @@ export function Login({ homeserverUrl, defaultIdpLabel, authConfig }: LoginProps
 
   // When OIDC/MAS is configured, auto-redirect to the OIDC flow
   useEffect(() => {
-    if (!authConfig?.issuer || redirectedRef.current) return;
+    if (!authConfig?.issuer || !oidcClientId || redirectedRef.current) return;
     redirectedRef.current = true;
     const callback = `${window.location.origin}/auth/callback`;
     const deviceId = getDeviceId();
@@ -62,10 +67,10 @@ export function Login({ homeserverUrl, defaultIdpLabel, authConfig }: LoginProps
       const { verifier, challenge } = await generatePKCE();
       sessionStorage.setItem("zooid_pkce_verifier", verifier);
       window.location.assign(
-        buildAuthorizeUrl(authConfig.issuer, "01M25WCYJPMTW1MHHT5JG2310W", callback, scopes, challenge),
+        buildAuthorizeUrl(authConfig.issuer, oidcClientId, callback, scopes, challenge),
       );
     })();
-  }, [authConfig]);
+  }, [authConfig, oidcClientId]);
 
   // Opt-in (VITE_AUTO_REDIRECT_SINGLE_SSO): on an SSO-only homeserver with a
   // single IdP (e.g. the Zoon community space behind accounts.zooid.dev), skip
@@ -125,12 +130,16 @@ export function Login({ homeserverUrl, defaultIdpLabel, authConfig }: LoginProps
   const onSso = async (idpId?: string) => {
     const callback = `${window.location.origin}/auth/callback`;
     if (authConfig?.issuer) {
+      if (!oidcClientId) {
+        setError("OIDC login is not configured for this deployment (missing oidc_client_id).");
+        return;
+      }
       const deviceId = getDeviceId();
       const scopes = `openid urn:matrix:client:api:* urn:matrix:client:device:${deviceId}`;
       const { verifier, challenge } = await generatePKCE();
       sessionStorage.setItem("zooid_pkce_verifier", verifier);
       window.location.assign(
-        buildAuthorizeUrl(authConfig.issuer, "01M25WCYJPMTW1MHHT5JG2310W", callback, scopes, challenge),
+        buildAuthorizeUrl(authConfig.issuer, oidcClientId, callback, scopes, challenge),
       );
     } else {
       window.location.assign(ssoRedirectUrl(homeserverUrl, callback, idpId));
@@ -146,9 +155,10 @@ export function Login({ homeserverUrl, defaultIdpLabel, authConfig }: LoginProps
           <CardTitle>Sign in to {homeserverHost(homeserverUrl)}</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          {error && (
+          {(error || oidcMisconfigured) && (
             <div role="alert" className="text-destructive text-sm">
-              {error}
+              {error ??
+                "OIDC login is not configured for this deployment (missing oidc_client_id)."}
             </div>
           )}
           {passwordFlow && (

@@ -29,6 +29,7 @@ export interface AppConfig {
   authConfig?: {
     issuer: string;
     account?: string;
+    oidcClientId?: string;
   };
 }
 
@@ -161,7 +162,7 @@ function AppRoutes({ config }: { config: AppConfig }) {
           )
         }
       />
-      <Route path="/auth/callback" element={<AuthCallback homeserverUrl={config.homeserverUrl} authIssuer={config.authConfig?.issuer} />} />
+      <Route path="/auth/callback" element={<AuthCallback homeserverUrl={config.homeserverUrl} authConfig={config.authConfig} />} />
     </Routes>
   );
 }
