@@ -1,9 +1,10 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { Direction } from "matrix-js-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeFakeClient, makeRoom, mkMatrixEvent, pushTimelineEvent } from "../../test/factories";
 import { MatrixClientPeg } from "../client/peg";
 import { useFillGap } from "./use-fill-gap";
+import { useTimeline } from "./use-timeline";
 
 const me = "@me:h.example";
 const roomId = "!r:h.example";
@@ -180,5 +181,64 @@ describe("useFillGap across joined timelines", () => {
 
     expect(paginate).toHaveBeenCalledWith(middle, { backwards: true, limit: 50 });
     expect(paginate).not.toHaveBeenCalledWith(newest, expect.anything());
+  });
+});
+
+describe("useFillGap for an anchor in no timeline", () => {
+  // A thread root fetched on its own belongs to no timeline, so the marker
+  // anchored to it has to fill the hole above it, and retire once joined.
+  it("paginates the hole above a fetched-root anchor, and the marker retires on join", async () => {
+    const client = makeFakeClient({ userId: me });
+    const room = makeRoom(roomId, { client, myUserId: me, timelineSupport: true });
+    const msg = (eventId: string, ts: number, extra: Record<string, unknown> = {}) =>
+      pushTimelineEvent(
+        room,
+        mkMatrixEvent({
+          eventId,
+          roomId,
+          sender: "@a:h.example",
+          type: "m.room.message",
+          content: { msgtype: "m.text", body: eventId, ...extra },
+          ts,
+        }),
+      );
+    msg("$f-old", 1000);
+    room.resetLiveTimeline("hole_tok", "old_sync_tok");
+    msg("$f-new-r1", 3000, { "m.relates_to": { rel_type: "m.thread", event_id: "$f-root" } });
+
+    const paginate = vi.fn().mockImplementation(async (newer) => {
+      const [older] = room.getUnfilteredTimelineSet().getTimelines();
+      newer.setNeighbouringTimeline(older, Direction.Backward);
+      older.setNeighbouringTimeline(newer, Direction.Forward);
+      newer.setPaginationToken(null, Direction.Backward);
+      return true;
+    });
+    Object.assign(client as unknown as Record<string, unknown>, {
+      getRoom: () => room,
+      paginateEventTimeline: paginate,
+      fetchRoomEvent: vi.fn().mockResolvedValue({
+        event_id: "$f-root",
+        room_id: roomId,
+        sender: "@a:h.example",
+        type: "m.room.message",
+        content: { msgtype: "m.text", body: "$f-root" },
+        origin_server_ts: 2000,
+      }),
+    });
+    MatrixClientPeg.injectClientForTest(client);
+
+    const timeline = renderHook(() => useTimeline(roomId));
+    await waitFor(() => expect(timeline.result.current.gapBeforeEventIds).toEqual(["$f-root"]));
+    const [, newer] = room.getUnfilteredTimelineSet().getTimelines();
+    expect(room.getUnfilteredTimelineSet().getTimelineForEvent("$f-root")).toBeNull();
+
+    const { result } = renderHook(() => useFillGap(roomId));
+    await act(async () => {
+      await result.current.fillGap("$f-root");
+    });
+
+    expect(paginate).toHaveBeenCalledWith(newer, { backwards: true, limit: 50 });
+    const after = renderHook(() => useTimeline(roomId));
+    expect(after.result.current.gapBeforeEventIds).toEqual([]);
   });
 });
