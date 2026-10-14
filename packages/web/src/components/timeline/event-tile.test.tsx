@@ -2,6 +2,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { makeFakeClient } from "../../../test/factories";
 import { MatrixClientPeg } from "../../client/peg";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { EventTile } from "./event-tile";
 
 // useThreadPreview requires a live MatrixClient; mock it.
@@ -131,5 +132,44 @@ describe("<EventTile /> media routing", () => {
       />,
     );
     expect(screen.getByText("report.pdf")).toBeDefined();
+  });
+});
+
+function turnEndEvent(content: Record<string, unknown>) {
+  return {
+    getType: () => "dev.zooid.turn.end",
+    getContent: () => content,
+    getSender: () => "@architect:hs.test",
+    getRoomId: () => "!a:hs.test",
+    getTs: () => 1_700_000_000_000,
+    getId: () => "$turn_end",
+    getThread: () => null,
+  } as never;
+}
+
+describe("<EventTile /> turn.end", () => {
+  function renderTurnEnd(content: Record<string, unknown>) {
+    MatrixClientPeg.injectClientForTest(makeFakeClient({ userId: "@me:hs.test" }));
+    return render(
+      <TooltipProvider>
+        <EventTile event={turnEndEvent(content)} />
+      </TooltipProvider>,
+    );
+  }
+
+  it("renders the indicator for an empty turn", () => {
+    renderTurnEnd({ session_id: "s1", produced_output: false, stop_reason: "end_turn" });
+    expect(screen.getByText(/ended its turn without output/)).toBeInTheDocument();
+  });
+
+  it("renders nothing for a turn with output", () => {
+    const { container } = renderTurnEnd({ session_id: "s1", produced_output: true });
+    expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByText(/turn ended/i)).toBeNull();
+  });
+
+  it("renders nothing for an older daemon's turn.end", () => {
+    const { container } = renderTurnEnd({ session_id: "s1" });
+    expect(container).toBeEmptyDOMElement();
   });
 });
