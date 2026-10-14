@@ -17,6 +17,7 @@ import { useToolCallApproval, useToolCallStatus } from "@/hooks/use-timeline";
 import { useUserName } from "@/hooks/use-user-name";
 import { UserAvatar } from "@/components/user-avatar";
 import { DiffView } from "./diff-view";
+import { EmptyTurnIndicator } from "./empty-turn-indicator";
 
 marked.use({ gfm: true, breaks: false });
 
@@ -57,7 +58,9 @@ export function ZooidEventTile({ decoded, sender, roomId, ts }: Props) {
       return null;
 
     case "turn.end":
-      return <Divider text={`turn ended${decoded.stopReason ? ` (${decoded.stopReason})` : ""}`} />;
+      return decoded.producedOutput === false ? (
+        <EmptyTurnIndicator agentName={senderName} stopReason={decoded.stopReason} />
+      ) : null;
 
     case "agent_message_chunk":
       return (
