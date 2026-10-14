@@ -1,5 +1,16 @@
 # @zooid/zoon-web
 
+## 0.16.0
+
+### Minor Changes
+
+- A turn that ends without any output now shows "<agent> ended its turn without output" in place of the per-turn divider, with the agent's stop reason in the tooltip. Needs zooid 0.18.0 or later for the stop reason.
+
+### Patch Changes
+
+- Loading a room history gap now fills it when the marker sits on a thread root that was fetched on its own, instead of leaving the hole in place.
+- b1353ad: The "Load messages" marker for a hole in a room's history now shows up when everything after the hole is thread replies, which is the usual case in agent rooms. Before, the marker was silently dropped there: missing threads (a morning standup, say) just weren't shown, and nothing indicated anything was missing.
+
 ## 0.15.0
 
 ### Minor Changes
