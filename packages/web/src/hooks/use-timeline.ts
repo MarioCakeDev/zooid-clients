@@ -219,6 +219,33 @@ function threadGapBeforeEventIds(
 }
 
 /**
+ * When the hole before `order[gapRank]` starts: the newest event of anything
+ * older. gapStartTimelines never returns the oldest timeline, so there is
+ * always something older.
+ */
+function holeStart(order: EventTimeline[], gapRank: number): number {
+  return Math.max(...order.slice(0, gapRank).map((tl) => tl.getEvents().at(-1)!.getTs()));
+}
+
+/**
+ * The gap-start timeline a room marker anchored to `eventId` fills, for an
+ * anchor that belongs to no timeline (a fetched thread root): the latest gap
+ * whose hole starts before the anchor. Undefined when the anchor is unknown or
+ * sits above every hole.
+ */
+export function gapTimelineAbove(room: Room, eventId: string): EventTimeline | undefined {
+  const anchor = fetchedEvents.get(eventId);
+  if (!anchor) return undefined;
+  const gaps = gapStartTimelines(room);
+  const order = timelinesOldestFirst(room);
+  let best: EventTimeline | undefined;
+  for (const gap of order) {
+    if (gaps.has(gap) && holeStart(order, order.indexOf(gap)) < anchor.getTs()) best = gap;
+  }
+  return best;
+}
+
+/**
  * Where the room's gap markers go: before the first rendered event below the
  * hole. Requiring the anchor to sit *in* the timeline after the hole drops the
  * marker in agent rooms, where that stretch is often all thread replies
@@ -237,14 +264,11 @@ function roomGapBeforeEventIds(room: Room, events: MatrixEvent[]): string[] {
   const anchors = new Set<string>();
   for (const gap of gaps) {
     const gapRank = order.indexOf(gap);
-    // gapStartTimelines never returns the oldest timeline, so this is non-empty.
-    const holeStart = Math.max(
-      ...order.slice(0, gapRank).map((tl) => tl.getEvents().at(-1)!.getTs()),
-    );
+    const start = holeStart(order, gapRank);
     const below = (ev: MatrixEvent) => {
       const id = ev.getId();
       const tl = id ? timelineSet.getTimelineForEvent(id) : null;
-      return tl ? order.indexOf(tl) >= gapRank : ev.getTs() > holeStart;
+      return tl ? order.indexOf(tl) >= gapRank : ev.getTs() > start;
     };
     const id = events.find(below)?.getId();
     if (id) anchors.add(id);

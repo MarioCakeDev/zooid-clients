@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { Direction, type EventTimeline } from "matrix-js-sdk";
 import { MatrixClientPeg } from "../client/peg";
+import { gapTimelineAbove } from "./use-timeline";
 
 /**
  * The earliest timeline joined to `timeline`. Its backward edge is the hole
@@ -29,7 +30,8 @@ function chainHead(timeline: EventTimeline): EventTimeline {
  * paginates the hole nearest above `eventId`. In the room that is the timeline
  * beginning at `eventId`, the one sitting on the far side of the gap. In a
  * thread it can be a timeline already joined above it, so we walk to the head
- * of the chain. One hook for both surfaces, no thread variant. Paginating it
+ * of the chain. An anchor in no timeline (a fetched thread root) fills the
+ * latest hole that starts before it. One hook for both surfaces, no thread variant. Paginating it
  * backwards walks into the hole and,
  * once it reaches events the room already has, the SDK joins the two timelines
  * and the marker disappears on its own.
@@ -47,8 +49,10 @@ export function useFillGap(roomId: string, limit = 50) {
       const room = client?.getRoom(roomId);
       if (!client || !room) return;
       const anchored = room.getUnfilteredTimelineSet().getTimelineForEvent(eventId);
-      if (!anchored) return;
-      const timeline = chainHead(anchored);
+      // A fetched thread root sits in no timeline; fill the hole above it.
+      // A gap-start timeline has no backward neighbour, so it is its own head.
+      const timeline = anchored ? chainHead(anchored) : gapTimelineAbove(room, eventId);
+      if (!timeline) return;
       setPendingGapId(eventId);
       try {
         await client.paginateEventTimeline(timeline, { backwards: true, limit });
