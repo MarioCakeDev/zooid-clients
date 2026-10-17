@@ -1,5 +1,47 @@
 # @zooid/zoon-web
 
+## 0.16.0
+
+### Minor Changes
+
+- A turn that ends without any output now shows "<agent> ended its turn without output" in place of the per-turn divider, with the agent's stop reason in the tooltip. Needs zooid 0.18.0 or later for the stop reason.
+
+### Patch Changes
+
+- Loading a room history gap now fills it when the marker sits on a thread root that was fetched on its own, instead of leaving the hole in place.
+- b1353ad: The "Load messages" marker for a hole in a room's history now shows up when everything after the hole is thread replies, which is the usual case in agent rooms. Before, the marker was silently dropped there: missing threads (a morning standup, say) just weren't shown, and nothing indicated anything was missing.
+
+## 0.15.0
+
+### Minor Changes
+
+- Show gaps in thread history with controls to load the missing messages. Load older room and thread messages from the oldest timeline so pagination continues correctly across gaps. Apply the Storybook dark theme to portaled menus and dialogs.
+
+## 0.14.0
+
+### Minor Changes
+
+- a252e7c: Display and answer agent elicitation forms, with confirmed resolution, field feedback, threaded questions, notifications, and awaiting-input status.
+
+### Patch Changes
+
+- bcfc7d1: A message the server rejects (for example sending from a room you've only been invited to) now shows as "Not sent" on its own tile with the reason, a Retry button that reuses the same transaction ID, and a Delete button, instead of looking delivered with a raw error under the composer.
+
+## 0.13.0
+
+### Minor Changes
+
+- Share and quote threads: every thread has a link you can copy and open directly, you can quote a message into your reply, and a share dialog posts a thread into another room — with a room picker and @mentions in the note. The client also opens on the workforce space the daemon advertises in its runtime config, so a fresh `zooid dev` lands you in the right place, and the Storybook build no longer breaks on the events polyfill.
+- 6a0fc2d: Read the initial workforce space from `workforce_space` in runtime `config.json` (default `dev`). The build-time `VITE_WORKFORCE_SPACE` setting is removed, so one bundle can serve several vhosts.
+- 35dd51e: Share dialog: pick the room from a search field with autocomplete, and write the comment in the composer's input so `@mentions` of the target room's members work. The composer's input core is now a shared `MessageInput`.
+- 263b49b: Copy link, quote and share messages and threads. Thread links open in the app and highlight the linked reply, a quoted message travels with a `dev.zooid.quote` reference and a readable body fallback, and Edit and Delete move into a new ⋯ menu on the message hover bar.
+
+## 0.12.1
+
+### Patch Changes
+
+- ce32958: Read the workforce roster from every `dev.zooid.workforce` state key in the space, not only `""`. Daemons now publish one roster per workstation, so agents from every workstation are recognized as agents.
+
 ## 0.12.0
 
 ### Minor Changes

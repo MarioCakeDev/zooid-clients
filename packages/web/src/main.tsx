@@ -39,6 +39,7 @@ async function bootstrap() {
     pushGatewayUrl: runtime?.push_gateway_url,
     vapidPublicKey: runtime?.vapid_public_key,
     authConfig,
+    workforceSpace: runtime?.workforce_space,
   };
   if (import.meta.env.DEV) {
     // Affordance for Playwright e2e (and ZNC002 features) to call SDK methods

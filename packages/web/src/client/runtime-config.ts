@@ -6,6 +6,11 @@ export interface RuntimeConfig {
   vapid_public_key?: string;
   /** Public OIDC client id registered with MAS for this deployment. */
   oidc_client_id?: string;
+  /**
+   * Alias localpart of the workforce space (no `#`, no server name). Unset
+   * means the deployment default below.
+   */
+  workforce_space?: string;
 }
 
 /**
@@ -25,6 +30,14 @@ export function resolveOidcClientId(opts: {
   return buildtime ? buildtime : null;
 }
 
+/** Fork default (upstream: `dev`): the daemon's workforce space alias is `zooid`. */
+export const DEFAULT_WORKFORCE_SPACE = "zooid";
+
+/** A well-formed alias localpart: non-empty, no `#`, no `:` (server name), no whitespace. */
+export function isValidWorkforceSpace(value: string): boolean {
+  return /^[^\s#:]+$/.test(value);
+}
+
 export async function loadRuntimeConfig(): Promise<RuntimeConfig | null> {
   try {
     const res = await fetch("/config.json", { cache: "no-store" });
@@ -37,6 +50,7 @@ export async function loadRuntimeConfig(): Promise<RuntimeConfig | null> {
     if (typeof json.push_gateway_url === "string") out.push_gateway_url = json.push_gateway_url;
     if (typeof json.vapid_public_key === "string") out.vapid_public_key = json.vapid_public_key;
     if (typeof json.oidc_client_id === "string") out.oidc_client_id = json.oidc_client_id;
+    if (typeof json.workforce_space === "string") out.workforce_space = json.workforce_space;
     return out;
   } catch {
     return null;

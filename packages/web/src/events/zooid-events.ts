@@ -119,7 +119,7 @@ export type DecodedZooidEvent =
       sessionId: string;
       entries: PlanBoardEntry[];
     }
-  | { kind: "turn.end"; sessionId: string; stopReason?: string }
+  | { kind: "turn.end"; sessionId: string; turnId?: string; stopReason?: string; producedOutput?: boolean }
   | { kind: "available_commands"; sessionId: string; commands: Array<{ name: string; description: string }> }
   | {
       kind: "error";
@@ -243,7 +243,9 @@ export function decodeZooidEvent(ev: MatrixEvent): DecodedZooidEvent | null {
       return {
         kind: "turn.end",
         sessionId,
+        turnId: typeof c.turn_id === "string" ? c.turn_id : undefined,
         stopReason: typeof c.stop_reason === "string" ? c.stop_reason : undefined,
+        producedOutput: typeof c.produced_output === "boolean" ? c.produced_output : undefined,
       };
 
     case ZooidEventType.AvailableCommandsUpdate: {

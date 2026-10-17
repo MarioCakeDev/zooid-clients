@@ -140,13 +140,45 @@ describe("decodeZooidEvent", () => {
       roomId: room,
       sender,
       type: ZooidEventType.TurnEnd,
-      content: { session_id: "s1", stop_reason: "end_turn" },
+      content: { session_id: "s1", stop_reason: "end_turn", produced_output: true, turn_id: "t1" },
     });
     expect(decodeZooidEvent(ev)).toEqual({
       kind: "turn.end",
       sessionId: "s1",
       stopReason: "end_turn",
+      producedOutput: true,
+      turnId: "t1",
     });
+  });
+
+  it("decodes an empty turn", () => {
+    const ev = mkMatrixEvent({
+      roomId: room,
+      sender,
+      type: ZooidEventType.TurnEnd,
+      content: { session_id: "s1", produced_output: false },
+    });
+    expect(decodeZooidEvent(ev)).toMatchObject({ kind: "turn.end", producedOutput: false });
+  });
+
+  it("decodes turn.end from an older daemon with no new fields", () => {
+    const ev = mkMatrixEvent({ roomId: room, sender, type: ZooidEventType.TurnEnd, content: { session_id: "s1" } });
+    const d = decodeZooidEvent(ev);
+    expect(d).toMatchObject({ kind: "turn.end" });
+    expect(d).toMatchObject({ producedOutput: undefined, stopReason: undefined, turnId: undefined });
+  });
+
+  it("ignores junk types on turn.end (a string \"false\" is not false)", () => {
+    const ev = mkMatrixEvent({
+      roomId: room,
+      sender,
+      type: ZooidEventType.TurnEnd,
+      content: { session_id: "s1", produced_output: "false", stop_reason: 5, turn_id: {} },
+    });
+    const d = decodeZooidEvent(ev) as { producedOutput?: unknown; stopReason?: unknown; turnId?: unknown };
+    expect(d.producedOutput).toBeUndefined();
+    expect(d.stopReason).toBeUndefined();
+    expect(d.turnId).toBeUndefined();
   });
 
   it("returns null for non-eco events", () => {

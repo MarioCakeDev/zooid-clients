@@ -1,9 +1,11 @@
-import { useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { useThread } from "../../hooks/use-timeline";
 import { useLoadMoreThread } from "../../hooks/use-load-more-thread";
+import { useFillGap } from "../../hooks/use-fill-gap";
 import { EventTile } from "../timeline/event-tile";
 import { LoadMoreButton } from "../timeline/load-more-button";
+import { TimelineGap } from "../timeline/timeline-gap";
 
 const PREFETCH_THRESHOLD = 5;
 /**
@@ -30,12 +32,17 @@ export function ThreadView({
   roomId,
   rootEventId,
   onBack,
+  highlightEventId,
 }: {
   roomId: string;
   rootEventId: string;
   onBack: () => void;
+  /** A reply to scroll to and flash, from a `?event=` link. */
+  highlightEventId?: string;
 }) {
-  const { root, rootPending, events, totalCount } = useThread(roomId, rootEventId);
+  const { root, rootPending, events, totalCount, gapBeforeEventIds } = useThread(roomId, rootEventId);
+  const { fillGap, pendingGapId } = useFillGap(roomId);
+  const gaps = new Set(gapBeforeEventIds);
   const { loadMore, loading, hasMore: canPaginate } = useLoadMoreThread(roomId, rootEventId);
   // Two conditions, both required: the server says replies are outstanding,
   // and there's somewhere left to paginate from. Offering the button on the
@@ -51,6 +58,27 @@ export function ThreadView({
     if (!el) return;
     atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
   }
+
+  const [flash, setFlash] = useState<string | null>(null);
+  const scrolledForRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!highlightEventId || scrolledForRef.current === highlightEventId) return;
+    if (!events.some((ev) => ev.getId() === highlightEventId)) return; // not loaded: open at the top
+    scrolledForRef.current = highlightEventId;
+    atBottomRef.current = false; // stop the stick-to-bottom effect from yanking us away
+    setFlash(highlightEventId);
+    const el = Array.from(scrollRef.current?.querySelectorAll<HTMLElement>("[data-event-id]") ?? []).find(
+      (n) => n.dataset.eventId === highlightEventId,
+    );
+    el?.scrollIntoView?.({ block: "center" });
+  }, [highlightEventId, events]);
+
+  useEffect(() => {
+    if (!flash) return;
+    const t = setTimeout(() => setFlash(null), 2500);
+    return () => clearTimeout(t);
+  }, [flash]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -114,11 +142,27 @@ export function ThreadView({
               </div>
             </li>
           )}
-          {events.map((ev) => (
-            <li key={ev.getId() ?? `${ev.getType()}-${ev.getTs()}`} className="contents">
-              <EventTile event={ev} disableThreadAffordances />
-            </li>
-          ))}
+          {events.map((ev) => {
+            const id = ev.getId();
+            return (
+              <Fragment key={id ?? `${ev.getType()}-${ev.getTs()}`}>
+                {id && gaps.has(id) && (
+                  <li className="contents">
+                    <TimelineGap loading={pendingGapId === id} onClick={() => void fillGap(id)} />
+                  </li>
+                )}
+                <li className="contents">
+                  <div
+                    data-event-id={id}
+                    data-highlighted={flash === id || undefined}
+                    className="rounded-md transition-colors data-[highlighted]:bg-primary/10"
+                  >
+                    <EventTile event={ev} disableThreadAffordances />
+                  </div>
+                </li>
+              </Fragment>
+            );
+          })}
         </ol>
       </div>
     </div>

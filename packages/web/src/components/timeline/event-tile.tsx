@@ -1,4 +1,6 @@
-import type { MatrixEvent } from "matrix-js-sdk";
+import { ElicitationEventType } from "../../events/elicitation";
+import { QuestionCard } from "./question-card";
+import { EventStatus, type MatrixEvent } from "matrix-js-sdk";
 import { ApprovalEventType } from "../../events/approval";
 import { decodeZooidEvent, isZooidLifecycle } from "../../events/zooid-events";
 import { ApprovalCard } from "./approval-card";
@@ -6,6 +8,7 @@ import { ZooidEventTile } from "./zooid-event";
 import { ErrorTile } from "./error-tile";
 import { MediaMessage } from "./media-message";
 import { MembershipEvent } from "./membership-event";
+import { EventSendFailure } from "./send-state";
 import { SessionDivider } from "./session-divider";
 import { TextMessage } from "./text-message";
 
@@ -27,7 +30,12 @@ export function EventTile({
   if (event.getType() === "m.room.message") {
     const msgtype = (event.getContent() as { msgtype?: string }).msgtype;
     if (msgtype && MEDIA_MSGTYPES.has(msgtype)) {
-      return <MediaMessage event={event} />;
+      return (
+        <div className={event.status === EventStatus.NOT_SENT ? "opacity-60" : undefined}>
+          <MediaMessage event={event} />
+          {event.status === EventStatus.NOT_SENT && <EventSendFailure event={event} />}
+        </div>
+      );
     }
     return (
       <TextMessage
@@ -39,6 +47,8 @@ export function EventTile({
       />
     );
   }
+  if (event.getType() === ElicitationEventType.Request) return <QuestionCard event={event} />;
+  if ([ElicitationEventType.Response, ElicitationEventType.Resolved, ElicitationEventType.Rejected].some((type) => type === event.getType())) return null;
   if (event.getType() === ApprovalEventType.Request) return <ApprovalCard event={event} />;
   // Approval *responses* are not rendered as their own tile — they only matter
   // as input to <ApprovalCard /> resolution. Skip silently.

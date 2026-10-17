@@ -9,6 +9,7 @@ import {
   RoomEvent,
 } from "matrix-js-sdk";
 import { useSyncExternalStore } from "react";
+import { ElicitationEventType, openElicitationSenders } from "../events/elicitation";
 import { MatrixClientPeg } from "../client/peg";
 import { extractToolCallContent, type DiffBlock } from "../events/zooid-events";
 
@@ -22,6 +23,12 @@ interface TimelineState {
    * not adjacent — messages are missing in between and have to be paginated in.
    */
   gapBeforeEventIds: string[];
+  /**
+   * `id:status` of every local echo. A status change (SENDING → NOT_SENT →
+   * SENDING → sent) mutates the same MatrixEvent in place, so without this the
+   * cached snapshot would look unchanged and the tile would never repaint.
+   */
+  echoKey: string;
 }
 
 export interface ThreadPreviewState {
@@ -40,15 +47,22 @@ export interface ThreadFullState {
   events: MatrixEvent[];
   /** Authoritative total reply count. */
   totalCount: number;
+  /**
+   * Ids of replies preceded by a hole the SDK could not join, between the
+   * root and that reply. Same discontinuity rule as the room's
+   * gapBeforeEventIds, applied to the thread's projection.
+   */
+  gapBeforeEventIds: string[];
 }
 
-const EMPTY: TimelineState = { events: [], pendingRootIds: [], gapBeforeEventIds: [] };
+const EMPTY: TimelineState = { events: [], pendingRootIds: [], gapBeforeEventIds: [], echoKey: "" };
 const THREAD_EMPTY: ThreadPreviewState = { events: [], totalCount: 0 };
 const THREAD_FULL_EMPTY: ThreadFullState = {
   root: undefined,
   rootPending: false,
   events: [],
   totalCount: 0,
+  gapBeforeEventIds: [],
 };
 
 const snapshotCache = new WeakMap<Room, TimelineState>();
@@ -60,7 +74,7 @@ const threadCache = new Map<
 
 const threadFullCache = new Map<
   string,
-  { replyCount: number; totalCount: number; root: MatrixEvent | undefined; rootPending: boolean; state: ThreadFullState }
+  { replyCount: number; totalCount: number; root: MatrixEvent | undefined; rootPending: boolean; gapKey: string; state: ThreadFullState }
 >();
 
 // Lazy-loaded events fetched via /rooms/{roomId}/event/{eventId} when the
@@ -121,6 +135,26 @@ export function allRoomEvents(room: Room): MatrixEvent[] {
   return out;
 }
 
+/** The room's non-empty unfiltered timelines, ordered by their first event. */
+function timelinesOldestFirst(room: Room): EventTimeline[] {
+  return room
+    .getUnfilteredTimelineSet()
+    .getTimelines()
+    .filter((tl) => tl.getEvents().length > 0)
+    .sort((a, b) => a.getEvents()[0].getTs() - b.getEvents()[0].getTs());
+}
+
+/**
+ * The timeline that owns the start of loaded history — the one "Load more"
+ * must paginate. After a gappy sync the live timeline is the far side of a
+ * hole, and joining it to an older one nulls its backward token, so it says
+ * nothing about whether older history remains. Falls back to the live timeline
+ * while the room has no events yet.
+ */
+export function oldestTimeline(room: Room): EventTimeline {
+  return timelinesOldestFirst(room)[0] ?? room.getLiveTimeline();
+}
+
 /**
  * Timelines that start after a hole in the room's history.
  *
@@ -136,11 +170,7 @@ export function allRoomEvents(room: Room): MatrixEvent[] {
  * "Load more" button at the top of the panel is for, not a hole.
  */
 function gapStartTimelines(room: Room): Set<EventTimeline> {
-  const timelines = room
-    .getUnfilteredTimelineSet()
-    .getTimelines()
-    .filter((tl) => tl.getEvents().length > 0)
-    .sort((a, b) => a.getEvents()[0].getTs() - b.getEvents()[0].getTs());
+  const timelines = timelinesOldestFirst(room);
 
   const out = new Set<EventTimeline>();
   for (let i = 1; i < timelines.length; i++) {
@@ -150,6 +180,102 @@ function gapStartTimelines(room: Room): Set<EventTimeline> {
     out.add(tl);
   }
   return out;
+}
+
+/**
+ * Where a thread's gap markers go. The room's gap-start timelines, projected
+ * onto the thread: a hole only counts if it starts after the root, and it is
+ * anchored to the first rendered reply in that timeline *or any later one*.
+ * The stretch right after the hole may hold no reply of this thread, while
+ * one further down still sits on the far side of it. Holes that resolve to
+ * the same reply show as one marker. A hole with no rendered reply after it
+ * has nothing to anchor to.
+ */
+function threadGapBeforeEventIds(
+  room: Room,
+  root: MatrixEvent | undefined,
+  replies: MatrixEvent[],
+): string[] {
+  const gaps = gapStartTimelines(room);
+  if (!root || gaps.size === 0) return [];
+  const order = timelinesOldestFirst(room);
+  const timelineSet = room.getUnfilteredTimelineSet();
+  const rank = (ev: MatrixEvent) => {
+    const id = ev.getId();
+    const tl = id ? timelineSet.getTimelineForEvent(id) : null;
+    return tl ? order.indexOf(tl) : -1;
+  };
+  const anchors = new Set<string>();
+  for (const gap of gaps) {
+    // A hole at or before the root has nothing of this thread above it.
+    if (gap.getEvents()[0].getTs() <= root.getTs()) continue;
+    const gapRank = order.indexOf(gap);
+    const id = replies.find((ev) => rank(ev) >= gapRank)?.getId();
+    if (id) anchors.add(id);
+  }
+  return replies
+    .map((ev) => ev.getId())
+    .filter((id): id is string => !!id && anchors.has(id));
+}
+
+/**
+ * When the hole before `order[gapRank]` starts: the newest event of anything
+ * older. gapStartTimelines never returns the oldest timeline, so there is
+ * always something older.
+ */
+function holeStart(order: EventTimeline[], gapRank: number): number {
+  return Math.max(...order.slice(0, gapRank).map((tl) => tl.getEvents().at(-1)!.getTs()));
+}
+
+/**
+ * The gap-start timeline a room marker anchored to `eventId` fills, for an
+ * anchor that belongs to no timeline (a fetched thread root): the latest gap
+ * whose hole starts before the anchor. Undefined when the anchor is unknown or
+ * sits above every hole.
+ */
+export function gapTimelineAbove(room: Room, eventId: string): EventTimeline | undefined {
+  const anchor = fetchedEvents.get(eventId);
+  if (!anchor) return undefined;
+  const gaps = gapStartTimelines(room);
+  const order = timelinesOldestFirst(room);
+  let best: EventTimeline | undefined;
+  for (const gap of order) {
+    if (gaps.has(gap) && holeStart(order, order.indexOf(gap)) < anchor.getTs()) best = gap;
+  }
+  return best;
+}
+
+/**
+ * Where the room's gap markers go: before the first rendered event below the
+ * hole. Requiring the anchor to sit *in* the timeline after the hole drops the
+ * marker in agent rooms, where that stretch is often all thread replies
+ * (filtered out of the room view) and the roots that do render were fetched on
+ * their own and sit in no timeline. So an event in a timeline counts if that
+ * timeline is the gap's or a later one, and a fetched root counts if it is
+ * newer than everything loaded above the hole. Holes that resolve to the same
+ * event show as one marker; a hole with nothing rendered below it has nothing
+ * to anchor to.
+ */
+function roomGapBeforeEventIds(room: Room, events: MatrixEvent[]): string[] {
+  const gaps = gapStartTimelines(room);
+  if (gaps.size === 0) return [];
+  const order = timelinesOldestFirst(room);
+  const timelineSet = room.getUnfilteredTimelineSet();
+  const anchors = new Set<string>();
+  for (const gap of gaps) {
+    const gapRank = order.indexOf(gap);
+    const start = holeStart(order, gapRank);
+    const below = (ev: MatrixEvent) => {
+      const id = ev.getId();
+      const tl = id ? timelineSet.getTimelineForEvent(id) : null;
+      return tl ? order.indexOf(tl) >= gapRank : ev.getTs() > start;
+    };
+    const id = events.find(below)?.getId();
+    if (id) anchors.add(id);
+  }
+  return events
+    .map((ev) => ev.getId())
+    .filter((id): id is string => !!id && anchors.has(id));
 }
 
 function snapshot(roomId: string): TimelineState {
@@ -200,28 +326,17 @@ function snapshot(roomId: string): TimelineState {
 
   events.sort((a, b) => a.getTs() - b.getTs());
 
-  // Anchor each gap to the first *rendered* event of the timeline that follows
-  // it. The timeline's own first event may have been filtered out above (a
-  // thread reply or an edit), and anchoring to an event that never reaches the
-  // DOM would silently drop the marker.
-  const gapTimelines = gapStartTimelines(room);
-  const gapBeforeEventIds: string[] = [];
-  if (gapTimelines.size > 0) {
-    const timelineSet = room.getUnfilteredTimelineSet();
-    for (const ev of events) {
-      const id = ev.getId();
-      if (!id) continue;
-      const tl = timelineSet.getTimelineForEvent(id);
-      if (!tl || !gapTimelines.has(tl)) continue;
-      gapBeforeEventIds.push(id);
-      gapTimelines.delete(tl);
-      if (gapTimelines.size === 0) break;
-    }
-  }
+  const gapBeforeEventIds = roomGapBeforeEventIds(room, events);
+
+  const echoKey = events
+    .filter((ev) => ev.status)
+    .map((ev) => `${ev.getId()}:${ev.status}`)
+    .join(",");
 
   const cached = snapshotCache.get(room);
   if (
     cached &&
+    cached.echoKey === echoKey &&
     cached.events.length === events.length &&
     cached.events[events.length - 1] === events[events.length - 1] &&
     cached.pendingRootIds.length === pendingRootIds.length &&
@@ -231,7 +346,7 @@ function snapshot(roomId: string): TimelineState {
   ) {
     return cached;
   }
-  const next = { events, pendingRootIds, gapBeforeEventIds };
+  const next = { events, pendingRootIds, gapBeforeEventIds, echoKey };
   snapshotCache.set(room, next);
   return next;
 }
@@ -296,6 +411,9 @@ function snapshotThreadFull(roomId: string, rootEventId: string): ThreadFullStat
   });
 
   const totalCount = Math.max(serverCount, threadEvents.length);
+  const gapBeforeEventIds = threadGapBeforeEventIds(room, root, threadEvents);
+  // A join adds no reply, so the reply count alone can't tell a stale snapshot.
+  const gapKey = gapBeforeEventIds.join(",");
   const cacheKey = `${roomId}:${rootEventId}`;
   const cached = threadFullCache.get(cacheKey);
   if (
@@ -303,17 +421,25 @@ function snapshotThreadFull(roomId: string, rootEventId: string): ThreadFullStat
     cached.replyCount === threadEvents.length &&
     cached.totalCount === totalCount &&
     cached.root === root &&
-    cached.rootPending === rootPending
+    cached.rootPending === rootPending &&
+    cached.gapKey === gapKey
   ) {
     return cached.state;
   }
 
-  const state: ThreadFullState = { root, rootPending, events: threadEvents, totalCount };
+  const state: ThreadFullState = {
+    root,
+    rootPending,
+    events: threadEvents,
+    totalCount,
+    gapBeforeEventIds,
+  };
   threadFullCache.set(cacheKey, {
     replyCount: threadEvents.length,
     totalCount,
     root,
     rootPending,
+    gapKey,
     state,
   });
   return state;
@@ -336,12 +462,18 @@ export function makeSubscribe(roomId: string) {
     const onTimelineReset = (room?: Room) => {
       if (room?.roomId === roomId) cb();
     };
+    // Fires when a local echo's status changes or it is cancelled or
+    // resent; the event is mutated in place so no Timeline event follows.
+    const onLocalEcho = (_ev: MatrixEvent, room: Room) => {
+      if (room.roomId === roomId) cb();
+    };
     client.on(RoomEvent.Timeline, onTimeline);
     client.on(RoomEvent.TimelineReset, onTimelineReset);
     client.on(ClientEvent.Room, onRoom);
     const room = client.getRoom(roomId);
     room?.on(RoomEvent.Timeline, onTimeline);
     room?.on(RoomEvent.TimelineReset, onTimelineReset);
+    room?.on(RoomEvent.LocalEchoUpdated, onLocalEcho);
     fetchSubscribers.add(cb);
     const unsubPeg = MatrixClientPeg.subscribe(cb);
     return () => {
@@ -350,6 +482,7 @@ export function makeSubscribe(roomId: string) {
       client.off(ClientEvent.Room, onRoom);
       room?.off(RoomEvent.Timeline, onTimeline);
       room?.off(RoomEvent.TimelineReset, onTimelineReset);
+      room?.off(RoomEvent.LocalEchoUpdated, onLocalEcho);
       fetchSubscribers.delete(cb);
       unsubPeg();
     };
@@ -553,4 +686,57 @@ export function useToolCallApproval(roomId: string, toolCallId: string): ToolCal
     () => snapshotToolCallApproval(roomId, toolCallId),
     () => TOOL_CALL_APPROVAL_EMPTY,
   );
+}
+
+
+const NO_EVENTS: MatrixEvent[] = [];
+const NO_USERS: string[] = [];
+const trailCache = new Map<string, { room: Room; key: string; value: MatrixEvent[] }>();
+const awaitingCache = new Map<string, { key: string; value: string[] }>();
+
+function snapshotElicitationTrail(roomId: string, requestId: string): MatrixEvent[] {
+  const room = MatrixClientPeg.safeGet()?.getRoom(roomId);
+  if (!room || !requestId) return NO_EVENTS;
+  const hits = allRoomEvents(room).filter(
+    (ev) =>
+      (ev.getType() === ElicitationEventType.Resolved || ev.getType() === ElicitationEventType.Rejected) &&
+      (ev.getContent() as { request_id?: unknown }).request_id === requestId,
+  );
+  const key = `${hits.length}:${hits.map((e) => e.getId()).join(",")}`;
+  const cacheKey = `${roomId}|${requestId}`;
+  const prev = trailCache.get(cacheKey);
+  if (prev && prev.room === room && prev.key === key) return prev.value;
+  const value = hits.length > 0 ? hits : NO_EVENTS;
+  trailCache.set(cacheKey, { room, key, value });
+  return value;
+}
+
+/** Resolved/rejected events for one question, thread-related ones included. */
+export function useElicitationTrail(roomId: string, requestId: string): MatrixEvent[] {
+  return useSyncExternalStore(
+    makeSubscribe(roomId),
+    () => snapshotElicitationTrail(roomId, requestId),
+    () => NO_EVENTS,
+  );
+}
+
+function snapshotAwaiting(roomId: string): string[] {
+  const room = MatrixClientPeg.safeGet()?.getRoom(roomId);
+  if (!room) return NO_USERS;
+  const senders = openElicitationSenders(
+    allRoomEvents(room).filter(
+      (ev) => ev.getType() === ElicitationEventType.Request || ev.getType() === ElicitationEventType.Resolved,
+    ),
+  );
+  const key = senders.join(",");
+  const prev = awaitingCache.get(roomId);
+  if (prev && prev.key === key) return prev.value;
+  const value = senders.length > 0 ? senders : NO_USERS;
+  awaitingCache.set(roomId, { key, value });
+  return value;
+}
+
+/** Agents in this room waiting on a human answer. */
+export function useAwaitingInput(roomId: string): string[] {
+  return useSyncExternalStore(makeSubscribe(roomId), () => snapshotAwaiting(roomId), () => NO_USERS);
 }

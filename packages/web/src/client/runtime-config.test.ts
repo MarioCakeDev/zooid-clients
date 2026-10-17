@@ -1,7 +1,11 @@
 import { http, HttpResponse } from "msw";
 import { describe, expect, it } from "vitest";
 import { mswServer } from "../../test/setup";
-import { loadRuntimeConfig, resolveOidcClientId } from "./runtime-config";
+import {
+  isValidWorkforceSpace,
+  loadRuntimeConfig,
+  resolveOidcClientId,
+} from "./runtime-config";
 
 describe("loadRuntimeConfig", () => {
   it("parses a valid config.json", async () => {
@@ -112,5 +116,25 @@ describe("resolveOidcClientId", () => {
 
   it("trims surrounding whitespace", () => {
     expect(resolveOidcClientId({ buildtime: "  build-id  " })).toBe("build-id");
+  });
+});
+
+describe("workforce_space", () => {
+  it("passes a string value through", async () => {
+    mswServer.use(http.get("/config.json", () => HttpResponse.json({ workforce_space: "acme" })));
+    expect((await loadRuntimeConfig())?.workforce_space).toBe("acme");
+  });
+
+  it("leaves the key unset when omitted or not a string", async () => {
+    mswServer.use(http.get("/config.json", () => HttpResponse.json({ workforce_space: 7 })));
+    expect((await loadRuntimeConfig())?.workforce_space).toBeUndefined();
+  });
+
+  it.each(["acme", "team-a", "a.b_c"])("accepts %s as a localpart", (v) => {
+    expect(isValidWorkforceSpace(v)).toBe(true);
+  });
+
+  it.each(["", "#acme", "acme:h.example", "#acme:h.example", "a b"])("rejects %j", (v) => {
+    expect(isValidWorkforceSpace(v)).toBe(false);
   });
 });
